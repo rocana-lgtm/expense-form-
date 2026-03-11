@@ -29,22 +29,41 @@ const toKorean = (n) => {
   return result + "원정";
 };
 
-const readFile = (file) => new Promise((resolve) => {
+const readFile = (file) => new Promise((resolve, reject) => {
   const img = new window.Image();
   const url = URL.createObjectURL(file);
   img.onload = () => {
-    const MAX = 1024;
-    let w = img.width, h = img.height;
-    if (w > MAX || h > MAX) {
-      if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-      else { w = Math.round(w * MAX / h); h = MAX; }
+    try {
+      const MAX = 1024;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+      URL.revokeObjectURL(url);
+      resolve({ image: dataUrl, imageBase64: dataUrl.split(",")[1], mediaType: "image/jpeg" });
+    } catch(e) {
+      URL.revokeObjectURL(url);
+      reject(e);
     }
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+  };
+  img.onerror = () => {
     URL.revokeObjectURL(url);
-    resolve({ image: dataUrl, imageBase64: dataUrl.split(",")[1], mediaType: "image/jpeg" });
+    // canvas 압축 실패 시 원본 FileReader로 폴백
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      const mediaType = dataUrl.startsWith("data:image/png") ? "image/png"
+        : dataUrl.startsWith("data:image/webp") ? "image/webp"
+        : "image/jpeg";
+      resolve({ image: dataUrl, imageBase64: dataUrl.split(",")[1], mediaType });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   };
   img.src = url;
 });
@@ -57,6 +76,34 @@ export default function App() {
   const [step, setStep] = useState("upload");
   const [errorMsg, setErrorMsg] = useState("");
   const [extractingAll, setExtractingAll] = useState(false);
+  const [mergedRows, setMergedRows] = useState([]); // 병합된 행 인덱스 쌍 [{from, to}]
+  const [selectingMerge, setSelectingMerge] = useState(false);
+  const [mergeSelection, setMergeSelection] = useState([]);
+
+  const toggleMergeSelect = (idx) => {
+    setMergeSelection(prev => {
+      if (prev.includes(idx)) return prev.filter(i => i !== idx);
+      const next = [...prev, idx].sort((a,b) => a-b);
+      if (next.length === 2) {
+        const [from, to] = next;
+        setMergedRows(p => {
+          const exists = p.findIndex(m => m.from === from && m.to === to);
+          if (exists >= 0) return p.filter((_,i) => i !== exists);
+          return [...p, {from, to}];
+        });
+        setMergeSelection([]);
+        setSelectingMerge(false);
+      }
+      return next.length === 2 ? [] : next;
+    });
+  };
+
+  const isMergedStart = (idx) => mergedRows.some(m => m.from === idx);
+  const isMergedHidden = (idx) => mergedRows.some(m => idx > m.from && idx <= m.to);
+  const getMergeSpan = (idx) => {
+    const m = mergedRows.find(m => m.from === idx);
+    return m ? m.to - m.from + 1 : 1;
+  };
   const singleRefs = useRef({});
   const bankRefs = useRef({});
   const galleryRef = useRef();
@@ -365,7 +412,20 @@ export default function App() {
                       <div style={{ fontWeight: 600, margin: "10px 0 4px" }}>
                         2. 소요금액 : ₩{totalAmount.toLocaleString()} &nbsp;( 일금 {toKorean(totalAmount)} )
                       </div>
-                      <div style={{ fontWeight: 600, marginBottom: 6 }}>3. 산출내역 및 결제 정보</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                      <div style={{ fontWeight: 600 }}>3. 산출내역 및 결제 정보</div>
+                      <button className="np" onClick={() => { setSelectingMerge(!selectingMerge); setMergeSelection([]); }}
+                        style={{ padding: "2px 10px", borderRadius: 12, border: "1px solid #4f8ef7", background: selectingMerge ? "#4f8ef7" : "white", color: selectingMerge ? "white" : "#4f8ef7", fontSize: 11, cursor: "pointer" }}>
+                        {selectingMerge ? "✕ 취소" : "🔗 셀 병합"}
+                      </button>
+                      {mergedRows.length > 0 && (
+                        <button className="np" onClick={() => setMergedRows([])}
+                          style={{ padding: "2px 10px", borderRadius: 12, border: "1px solid #e74c3c", background: "white", color: "#e74c3c", fontSize: 11, cursor: "pointer" }}>
+                          병합 해제
+                        </button>
+                      )}
+                    </div>
+                    {selectingMerge && <div className="np" style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>💡 병합할 행 2개를 순서대로 클릭하세요</div>}
                       <table style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead>
                           <tr style={{ background: "#f0f0f0" }}>
@@ -392,8 +452,9 @@ export default function App() {
                             </tr>
                           ))}
                           <tr style={{ background: "#f8f8f8", fontWeight: 700 }}>
-                            <td colSpan={3} style={{ ...tdBL, padding: "6px 8px", textAlign: "center" }}>합 계</td>
+                            <td colSpan={4} style={{ ...tdBL, padding: "6px 8px", textAlign: "center" }}>합 계</td>
                             <td style={{ ...tdBL, padding: "6px 8px", textAlign: "right" }}>₩{totalAmount.toLocaleString()}</td>
+                          <td style={{ ...tdBL }}></td>
                             <td style={{ ...tdBL }}></td>
                           </tr>
                         </tbody>
