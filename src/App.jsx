@@ -30,16 +30,23 @@ const toKorean = (n) => {
 };
 
 const readFile = (file) => new Promise((resolve) => {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const dataUrl = e.target.result;
-    const mediaType = dataUrl.startsWith("data:image/png") ? "image/png"
-      : dataUrl.startsWith("data:image/webp") ? "image/webp"
-      : dataUrl.startsWith("data:image/gif") ? "image/gif"
-      : "image/jpeg";
-    resolve({ image: dataUrl, imageBase64: dataUrl.split(",")[1], mediaType });
+  const img = new window.Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const MAX = 1024;
+    let w = img.width, h = img.height;
+    if (w > MAX || h > MAX) {
+      if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+      else { w = Math.round(w * MAX / h); h = MAX; }
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    URL.revokeObjectURL(url);
+    resolve({ image: dataUrl, imageBase64: dataUrl.split(",")[1], mediaType: "image/jpeg" });
   };
-  reader.readAsDataURL(file);
+  img.src = url;
 });
 
 export default function App() {
