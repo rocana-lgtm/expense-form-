@@ -76,34 +76,7 @@ export default function App() {
   const [step, setStep] = useState("upload");
   const [errorMsg, setErrorMsg] = useState("");
   const [extractingAll, setExtractingAll] = useState(false);
-  const [mergedRows, setMergedRows] = useState([]); // 병합된 행 인덱스 쌍 [{from, to}]
-  const [selectingMerge, setSelectingMerge] = useState(false);
-  const [mergeSelection, setMergeSelection] = useState([]);
 
-  const toggleMergeSelect = (idx) => {
-    setMergeSelection(prev => {
-      if (prev.includes(idx)) return prev.filter(i => i !== idx);
-      const next = [...prev, idx].sort((a,b) => a-b);
-      if (next.length === 2) {
-        const [from, to] = next;
-        setMergedRows(p => {
-          const exists = p.findIndex(m => m.from === from && m.to === to);
-          if (exists >= 0) return p.filter((_,i) => i !== exists);
-          return [...p, {from, to}];
-        });
-        setMergeSelection([]);
-        setSelectingMerge(false);
-      }
-      return next.length === 2 ? [] : next;
-    });
-  };
-
-  const isMergedStart = (idx) => mergedRows.some(m => m.from === idx);
-  const isMergedHidden = (idx) => mergedRows.some(m => idx > m.from && idx <= m.to);
-  const getMergeSpan = (idx) => {
-    const m = mergedRows.find(m => m.from === idx);
-    return m ? m.to - m.from + 1 : 1;
-  };
   const singleRefs = useRef({});
   const bankRefs = useRef({});
   const galleryRef = useRef();
@@ -174,6 +147,75 @@ export default function App() {
     setStep("result");
   };
 
+  const saveToGoogleDocs = () => {
+    const alpha = koreanAlpha;
+    const contentLines = useCustomContent
+      ? contentText.split("\n").map(l => `<p style="margin:0;line-height:2">${l}</p>`).join("")
+      : items.map((item, idx) => `<p style="margin:0;line-height:2">${alpha(idx)}. ${item.내용 || `항목 ${idx+1}`}</p>`).join("");
+
+    const rows = items.map((item, idx) => `
+      <tr>
+        <td style="border:1px solid #333;padding:5px 8px;text-align:center">${alpha(idx)}</td>
+        <td style="border:1px solid #333;padding:5px 8px">${item.내용 || ""}</td>
+        <td style="border:1px solid #333;padding:5px 8px">${item.입금계좌 || ""}</td>
+        <td style="border:1px solid #333;padding:5px 8px">${item.거래처 || ""}${item.연락처 ? "<br/><small>" + item.연락처 + "</small>" : ""}</td>
+        <td style="border:1px solid #333;padding:5px 8px;text-align:right">₩${(parseInt(item.금액?.replace(/,/g,"") || 0)||0).toLocaleString()}</td>
+        <td style="border:1px solid #333;padding:5px 8px">${item.출금계좌 || ""}</td>
+      </tr>`).join("");
+
+    const html = `
+<html xmlns:o='urn:schemas-microsoft-com:office:office'
+      xmlns:w='urn:schemas-microsoft-com:office:word'
+      xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset='utf-8'><title>품의서</title>
+<style>
+  body { font-family: 'Malgun Gothic', sans-serif; font-size: 10pt; margin: 20mm; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border: 1px solid #333; padding: 5px 8px; font-size: 9pt; }
+  th { background: #f0f0f0; font-weight: bold; text-align: center; }
+  h2 { text-align: center; font-size: 14pt; margin-bottom: 16px; }
+</style></head>
+<body>
+<h2>품의 및 지출결의서</h2>
+<table style="margin-bottom:8px">
+  <tr><td style="background:#f8f8f8;font-weight:bold;width:120px">기 안 일</td><td>${header.기안일 || ""}</td>
+      <td style="background:#f8f8f8;font-weight:bold;width:120px">기 안 자</td><td>${header.기안자 || ""}</td></tr>
+  <tr><td style="background:#f8f8f8;font-weight:bold">소속/직책</td><td>${header.소속직책 || ""}</td>
+      <td style="background:#f8f8f8;font-weight:bold">지급기한</td><td>${header.지급기한 || ""}</td></tr>
+  <tr><td style="background:#f8f8f8;font-weight:bold">제 목</td><td colspan="3">${header.제목 || ""}</td></tr>
+</table>
+<p style="margin:8px 0">아래와 같이 사유로 품의 및 지출결의서를 제출하오니 검토 후 승인하여 주시기 바랍니다.</p>
+<p style="margin:6px 0;font-weight:bold">1. 내 용</p>
+<div style="margin-left:20px">${contentLines}</div>
+<p style="margin:8px 0;font-weight:bold">2. 소요금액 : ₩${totalAmount.toLocaleString()} ( 일금 ${toKorean(totalAmount)} )</p>
+<p style="margin:6px 0;font-weight:bold">3. 산출내역 및 결제 정보</p>
+<table>
+  <tr>
+    <th>구 분</th><th>내 용</th><th>입금계좌 정보</th>
+    <th>거래처 담당 연락처</th><th>금 액</th><th>출금계좌</th>
+  </tr>
+  ${rows}
+  <tr>
+    <td colspan="4" style="text-align:center;font-weight:bold;background:#f8f8f8">합 계</td>
+    <td style="text-align:right;font-weight:bold">₩${totalAmount.toLocaleString()}</td>
+    <td></td>
+  </tr>
+</table>
+<p style="margin-top:12px">
+${items.map((item,idx) => `첨부 ${idx*2+1}. 영수증 ${idx+1} 사본${item.통장사본 ? ` &nbsp; 첨부 ${idx*2+2}. 통장사본 ${idx+1}` : ""}`).join("<br/>")}
+</p>
+</body></html>`;
+
+    const blob = new Blob([html], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `품의서_${header.기안자 || "미입력"}_${header.기안일 || "날짜없음"}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+
   const totalAmount = items.reduce((sum, it) => sum + (parseInt(it.금액?.replace(/,/g,"") || "0") || 0), 0);
   const tdB = { border: "1px solid #333" };
   const tdBL = { border: "1px solid #bbb" };
@@ -204,6 +246,7 @@ export default function App() {
         {step === "result" && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setStep("upload")} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #555", background: "transparent", color: "#ccc", cursor: "pointer", fontSize: 12 }}>← 수정</button>
+            <button onClick={saveToGoogleDocs} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#34a853", color: "white", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>📄 Google Docs 저장</button>
             <button onClick={() => window.print()} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#4f8ef7", color: "white", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>🖨️ 인쇄/PDF 저장</button>
           </div>
         )}
@@ -266,13 +309,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 전체 자동추출 버튼 */}
-            {items.some(it => it.image) && (
-              <button onClick={extractAll} disabled={extractingAll}
-                style={{ width: "100%", padding: "11px", borderRadius: 10, border: "none", background: extractingAll ? "#eee" : "#4f8ef7", color: extractingAll ? "#aaa" : "white", fontSize: 14, fontWeight: 700, cursor: extractingAll ? "not-allowed" : "pointer", marginBottom: 14 }}>
-                {extractingAll ? "⏳ 전체 분석 중..." : "✨ 전체 자동추출"}
-              </button>
-            )}
+
 
             {/* 영수증 카드 */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 14, marginBottom: 14 }}>
@@ -328,9 +365,9 @@ export default function App() {
               </div>
             </div>
 
-            <button onClick={goToResult}
-              style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: "#1a1a2e", color: "white", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
-              품의서 완성 →
+            <button onClick={goToResult} disabled={extractingAll}
+              style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: extractingAll ? "#555" : "#1a1a2e", color: "white", fontSize: 15, fontWeight: 700, cursor: extractingAll ? "not-allowed" : "pointer" }}>
+              {extractingAll ? "⏳ 분석 중..." : "품의서 완성 →"}
             </button>
           </div>
         )}
@@ -412,20 +449,7 @@ export default function App() {
                       <div style={{ fontWeight: 600, margin: "10px 0 4px" }}>
                         2. 소요금액 : ₩{totalAmount.toLocaleString()} &nbsp;( 일금 {toKorean(totalAmount)} )
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                      <div style={{ fontWeight: 600 }}>3. 산출내역 및 결제 정보</div>
-                      <button className="np" onClick={() => { setSelectingMerge(!selectingMerge); setMergeSelection([]); }}
-                        style={{ padding: "2px 10px", borderRadius: 12, border: "1px solid #4f8ef7", background: selectingMerge ? "#4f8ef7" : "white", color: selectingMerge ? "white" : "#4f8ef7", fontSize: 11, cursor: "pointer" }}>
-                        {selectingMerge ? "✕ 취소" : "🔗 셀 병합"}
-                      </button>
-                      {mergedRows.length > 0 && (
-                        <button className="np" onClick={() => setMergedRows([])}
-                          style={{ padding: "2px 10px", borderRadius: 12, border: "1px solid #e74c3c", background: "white", color: "#e74c3c", fontSize: 11, cursor: "pointer" }}>
-                          병합 해제
-                        </button>
-                      )}
-                    </div>
-                    {selectingMerge && <div className="np" style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>💡 병합할 행 2개를 순서대로 클릭하세요</div>}
+                      <div style={{ fontWeight: 600, marginBottom: 6 }}>3. 산출내역 및 결제 정보</div>
                       <table style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead>
                           <tr style={{ background: "#f0f0f0" }}>
